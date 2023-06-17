@@ -1,4 +1,4 @@
-PLUGIN_BINARY=hello-driver
+PLUGIN_BINARY=wasmtime-driver
 export GO111MODULE=on
 
 default: build
@@ -8,4 +8,4 @@ clean: ## Remove build artifacts
 	rm -rf ${PLUGIN_BINARY}
 
 build:
-	go build -o ${PLUGIN_BINARY} .
+	go build -ldflags="-s -w" -o drivers/${PLUGIN_BINARY} .

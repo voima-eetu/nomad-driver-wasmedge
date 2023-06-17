@@ -7,10 +7,11 @@ job "example" {
 
   group "example" {
     task "hello-world" {
-      driver = "hello-world-example"
+      driver = "wasmtime"
 
       config {
-        greeting = "hello"
+        binary = "/Users/c16a/projects/zig-sample/main.wasm"
+        invoke_fn = "print_hello"
       }
     }
   }

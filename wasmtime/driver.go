@@ -1,7 +1,7 @@
 // Copyright (c) HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
-package hello
+package wasmtime
 
 import (
 	"context"
@@ -27,7 +27,7 @@ const (
 	// pluginName is the name of the plugin
 	// this is used for logging and (along with the version) for uniquely
 	// identifying plugin binaries fingerprinted by the client
-	pluginName = "hello-world-example"
+	pluginName = "wasmtime"
 
 	// pluginVersion allows the client to identify and use newer versions of
 	// an installed plugin
@@ -66,7 +66,7 @@ var (
 		//
 		// For example, for the schema below a valid configuration would be:
 		//
-		//   plugin "hello-driver-plugin" {
+		//   plugin "wasmtime-driver-plugin" {
 		//     config {
 		//       shell = "fish"
 		//     }
@@ -75,6 +75,10 @@ var (
 			hclspec.NewAttr("shell", "string", false),
 			hclspec.NewLiteral(`"bash"`),
 		),
+		"path": hclspec.NewDefault(
+			hclspec.NewAttr("path", "string", false),
+			hclspec.NewLiteral(`"/usr/bin/wasmtime"`),
+		),
 	})
 
 	// taskConfigSpec is the specification of the plugin's configuration for
@@ -82,7 +86,6 @@ var (
 	// this is used to validated the configuration specified for the plugin
 	// when a job is submitted.
 	taskConfigSpec = hclspec.NewObject(map[string]*hclspec.Spec{
-		// TODO: define plugin's task configuration schema
 		//
 		// The schema should be defined using HCL specs and it will be used to
 		// validate the task configuration provided by the user when they
@@ -92,17 +95,15 @@ var (
 		//   job "example" {
 		//     group "example" {
 		//       task "say-hi" {
-		//         driver = "hello-driver-plugin"
+		//         driver = "wasmtime-driver-plugin"
 		//         config {
 		//           greeting = "Hi"
 		//         }
 		//       }
 		//     }
 		//   }
-		"greeting": hclspec.NewDefault(
-			hclspec.NewAttr("greeting", "string", false),
-			hclspec.NewLiteral(`"Hello, World!"`),
-		),
+		"binary":    hclspec.NewAttr("binary", "string", true),
+		"invoke_fn": hclspec.NewAttr("invoke_fn", "string", false),
 	})
 
 	// capabilities indicates what optional features this driver supports
@@ -120,12 +121,10 @@ var (
 
 // Config contains configuration information for the plugin
 type Config struct {
-	// TODO: create decoded plugin configuration struct
-	//
 	// This struct is the decoded version of the schema defined in the
 	// configSpec variable above. It's used to convert the HCL configuration
 	// passed by the Nomad agent into Go contructs.
-	Shell string `codec:"shell"`
+	Path string `codec:"path"`
 }
 
 // TaskConfig contains configuration information for a task that runs with
@@ -136,7 +135,8 @@ type TaskConfig struct {
 	// This struct is the decoded version of the schema defined in the
 	// taskConfigSpec variable above. It's used to convert the string
 	// configuration for the task into Go contructs.
-	Greeting string `codec:"greeting"`
+	Binary   string `codec:"binary"`
+	InvokeFn string `codec:"invoke_fn"`
 }
 
 // TaskState is the runtime state which is encoded in the handle returned to
@@ -159,9 +159,9 @@ type TaskState struct {
 	Pid int
 }
 
-// HelloDriverPlugin is an example driver plugin. When provisioned in a job,
+// WasmtimeDriverPlugin is an example driver plugin. When provisioned in a job,
 // the taks will output a greet specified by the user.
-type HelloDriverPlugin struct {
+type WasmtimeDriverPlugin struct {
 	// eventer is used to handle multiplexing of TaskEvents calls such that an
 	// event can be broadcast to all callers
 	eventer *eventer.Eventer
@@ -192,7 +192,7 @@ func NewPlugin(logger hclog.Logger) drivers.DriverPlugin {
 	ctx, cancel := context.WithCancel(context.Background())
 	logger = logger.Named(pluginName)
 
-	return &HelloDriverPlugin{
+	return &WasmtimeDriverPlugin{
 		eventer:        eventer.NewEventer(ctx, logger),
 		config:         &Config{},
 		tasks:          newTaskStore(),
@@ -203,17 +203,17 @@ func NewPlugin(logger hclog.Logger) drivers.DriverPlugin {
 }
 
 // PluginInfo returns information describing the plugin.
-func (d *HelloDriverPlugin) PluginInfo() (*base.PluginInfoResponse, error) {
+func (d *WasmtimeDriverPlugin) PluginInfo() (*base.PluginInfoResponse, error) {
 	return pluginInfo, nil
 }
 
 // ConfigSchema returns the plugin configuration schema.
-func (d *HelloDriverPlugin) ConfigSchema() (*hclspec.Spec, error) {
+func (d *WasmtimeDriverPlugin) ConfigSchema() (*hclspec.Spec, error) {
 	return configSpec, nil
 }
 
 // SetConfig is called by the client to pass the configuration for the plugin.
-func (d *HelloDriverPlugin) SetConfig(cfg *base.Config) error {
+func (d *WasmtimeDriverPlugin) SetConfig(cfg *base.Config) error {
 	var config Config
 	if len(cfg.PluginConfig) != 0 {
 		if err := base.MsgPackDecode(cfg.PluginConfig, &config); err != nil {
@@ -224,53 +224,34 @@ func (d *HelloDriverPlugin) SetConfig(cfg *base.Config) error {
 	// Save the configuration to the plugin
 	d.config = &config
 
-	// TODO: parse and validated any configuration value if necessary.
-	//
-	// If your driver agent configuration requires any complex validation
-	// (some dependency between attributes) or special data parsing (the
-	// string "10s" into a time.Interval) you can do it here and update the
-	// value in d.config.
-	//
-	// In the example below we check if the shell specified by the user is
-	// supported by the plugin.
-	shell := d.config.Shell
-	if shell != "bash" && shell != "fish" {
-		return fmt.Errorf("invalid shell %s", d.config.Shell)
-	}
-
 	// Save the Nomad agent configuration
 	if cfg.AgentConfig != nil {
 		d.nomadConfig = cfg.AgentConfig.Driver
 	}
 
-	// TODO: initialize any extra requirements if necessary.
-	//
-	// Here you can use the config values to initialize any resources that are
-	// shared by all tasks that use this driver, such as a daemon process.
-
 	return nil
 }
 
 // TaskConfigSchema returns the HCL schema for the configuration of a task.
-func (d *HelloDriverPlugin) TaskConfigSchema() (*hclspec.Spec, error) {
+func (d *WasmtimeDriverPlugin) TaskConfigSchema() (*hclspec.Spec, error) {
 	return taskConfigSpec, nil
 }
 
 // Capabilities returns the features supported by the driver.
-func (d *HelloDriverPlugin) Capabilities() (*drivers.Capabilities, error) {
+func (d *WasmtimeDriverPlugin) Capabilities() (*drivers.Capabilities, error) {
 	return capabilities, nil
 }
 
 // Fingerprint returns a channel that will be used to send health information
 // and other driver specific node attributes.
-func (d *HelloDriverPlugin) Fingerprint(ctx context.Context) (<-chan *drivers.Fingerprint, error) {
+func (d *WasmtimeDriverPlugin) Fingerprint(ctx context.Context) (<-chan *drivers.Fingerprint, error) {
 	ch := make(chan *drivers.Fingerprint)
 	go d.handleFingerprint(ctx, ch)
 	return ch, nil
 }
 
 // handleFingerprint manages the channel and the flow of fingerprint data.
-func (d *HelloDriverPlugin) handleFingerprint(ctx context.Context, ch chan<- *drivers.Fingerprint) {
+func (d *WasmtimeDriverPlugin) handleFingerprint(ctx context.Context, ch chan<- *drivers.Fingerprint) {
 	defer close(ch)
 
 	// Nomad expects the initial fingerprint to be sent immediately
@@ -291,7 +272,7 @@ func (d *HelloDriverPlugin) handleFingerprint(ctx context.Context, ch chan<- *dr
 }
 
 // buildFingerprint returns the driver's fingerprint data
-func (d *HelloDriverPlugin) buildFingerprint() *drivers.Fingerprint {
+func (d *WasmtimeDriverPlugin) buildFingerprint() *drivers.Fingerprint {
 	fp := &drivers.Fingerprint{
 		Attributes:        map[string]*structs.Attribute{},
 		Health:            drivers.HealthStateHealthy,
@@ -314,33 +295,31 @@ func (d *HelloDriverPlugin) buildFingerprint() *drivers.Fingerprint {
 	//
 	// In the example below we check if the shell specified by the user exists
 	// in the node.
-	shell := d.config.Shell
+	path := d.config.Path
 
-	cmd := exec.Command("which", shell)
+	cmd := exec.Command("which", path)
 	if err := cmd.Run(); err != nil {
 		return &drivers.Fingerprint{
 			Health:            drivers.HealthStateUndetected,
-			HealthDescription: fmt.Sprintf("shell %s not found", shell),
+			HealthDescription: fmt.Sprintf("wasmtime binary %s not found", path),
 		}
 	}
 
-	// We also set the shell and its version as attributes
-	cmd = exec.Command(shell, "--version")
-	if out, err := cmd.Output(); err != nil {
-		d.logger.Warn("failed to find shell version: %v", err)
+	wasmtimeCmd := exec.Command(path, "--version")
+	if out, err := wasmtimeCmd.Output(); err != nil {
+		d.logger.Warn("failed to find wasmtime version: %v", err)
 	} else {
 		re := regexp.MustCompile("[0-9]\\.[0-9]\\.[0-9]")
 		version := re.FindString(string(out))
 
-		fp.Attributes["driver.hello.shell_version"] = structs.NewStringAttribute(version)
-		fp.Attributes["driver.hello.shell"] = structs.NewStringAttribute(shell)
+		fp.Attributes["driver.wasmtime.version"] = structs.NewStringAttribute(version)
 	}
 
 	return fp
 }
 
 // StartTask returns a task handle and a driver network if necessary.
-func (d *HelloDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
+func (d *WasmtimeDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
 	if _, ok := d.tasks.Get(cfg.ID); ok {
 		return nil, nil, fmt.Errorf("task with ID %q already started", cfg.ID)
 	}
@@ -375,27 +354,33 @@ func (d *HelloDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHan
 		LogLevel: "debug",
 	}
 
-	exec, pluginClient, err := executor.CreateExecutor(d.logger, d.nomadConfig, executorConfig)
+	e, pluginClient, err := executor.CreateExecutor(d.logger, d.nomadConfig, executorConfig)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create executor: %v", err)
 	}
 
-	echoCmd := fmt.Sprintf(`echo "%s"`, driverConfig.Greeting)
+	var args []string
+	if len(driverConfig.InvokeFn) > 0 {
+		args = []string{"--invoke", driverConfig.InvokeFn, driverConfig.Binary}
+	} else {
+		args = []string{driverConfig.Binary}
+	}
+
 	execCmd := &executor.ExecCommand{
-		Cmd:        d.config.Shell,
-		Args:       []string{"-c", echoCmd},
+		Cmd:        d.config.Path,
+		Args:       args,
 		StdoutPath: cfg.StdoutPath,
 		StderrPath: cfg.StderrPath,
 	}
 
-	ps, err := exec.Launch(execCmd)
+	ps, err := e.Launch(execCmd)
 	if err != nil {
 		pluginClient.Kill()
 		return nil, nil, fmt.Errorf("failed to launch command with executor: %v", err)
 	}
 
 	h := &taskHandle{
-		exec:         exec,
+		exec:         e,
 		pid:          ps.Pid,
 		pluginClient: pluginClient,
 		taskConfig:   cfg,
@@ -421,7 +406,7 @@ func (d *HelloDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHan
 }
 
 // RecoverTask recreates the in-memory state of a task from a TaskHandle.
-func (d *HelloDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
+func (d *WasmtimeDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 	if handle == nil {
 		return errors.New("error: handle cannot be nil")
 	}
@@ -474,7 +459,7 @@ func (d *HelloDriverPlugin) RecoverTask(handle *drivers.TaskHandle) error {
 }
 
 // WaitTask returns a channel used to notify Nomad when a task exits.
-func (d *HelloDriverPlugin) WaitTask(ctx context.Context, taskID string) (<-chan *drivers.ExitResult, error) {
+func (d *WasmtimeDriverPlugin) WaitTask(ctx context.Context, taskID string) (<-chan *drivers.ExitResult, error) {
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
@@ -485,7 +470,7 @@ func (d *HelloDriverPlugin) WaitTask(ctx context.Context, taskID string) (<-chan
 	return ch, nil
 }
 
-func (d *HelloDriverPlugin) handleWait(ctx context.Context, handle *taskHandle, ch chan *drivers.ExitResult) {
+func (d *WasmtimeDriverPlugin) handleWait(ctx context.Context, handle *taskHandle, ch chan *drivers.ExitResult) {
 	defer close(ch)
 	var result *drivers.ExitResult
 
@@ -523,7 +508,7 @@ func (d *HelloDriverPlugin) handleWait(ctx context.Context, handle *taskHandle, 
 }
 
 // StopTask stops a running task with the given signal and within the timeout window.
-func (d *HelloDriverPlugin) StopTask(taskID string, timeout time.Duration, signal string) error {
+func (d *WasmtimeDriverPlugin) StopTask(taskID string, timeout time.Duration, signal string) error {
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return drivers.ErrTaskNotFound
@@ -549,7 +534,7 @@ func (d *HelloDriverPlugin) StopTask(taskID string, timeout time.Duration, signa
 }
 
 // DestroyTask cleans up and removes a task that has terminated.
-func (d *HelloDriverPlugin) DestroyTask(taskID string, force bool) error {
+func (d *WasmtimeDriverPlugin) DestroyTask(taskID string, force bool) error {
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return drivers.ErrTaskNotFound
@@ -580,7 +565,7 @@ func (d *HelloDriverPlugin) DestroyTask(taskID string, force bool) error {
 }
 
 // InspectTask returns detailed status information for the referenced taskID.
-func (d *HelloDriverPlugin) InspectTask(taskID string) (*drivers.TaskStatus, error) {
+func (d *WasmtimeDriverPlugin) InspectTask(taskID string) (*drivers.TaskStatus, error) {
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
@@ -590,7 +575,7 @@ func (d *HelloDriverPlugin) InspectTask(taskID string) (*drivers.TaskStatus, err
 }
 
 // TaskStats returns a channel which the driver should send stats to at the given interval.
-func (d *HelloDriverPlugin) TaskStats(ctx context.Context, taskID string, interval time.Duration) (<-chan *drivers.TaskResourceUsage, error) {
+func (d *WasmtimeDriverPlugin) TaskStats(ctx context.Context, taskID string, interval time.Duration) (<-chan *drivers.TaskResourceUsage, error) {
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
@@ -608,13 +593,13 @@ func (d *HelloDriverPlugin) TaskStats(ctx context.Context, taskID string, interv
 }
 
 // TaskEvents returns a channel that the plugin can use to emit task related events.
-func (d *HelloDriverPlugin) TaskEvents(ctx context.Context) (<-chan *drivers.TaskEvent, error) {
+func (d *WasmtimeDriverPlugin) TaskEvents(ctx context.Context) (<-chan *drivers.TaskEvent, error) {
 	return d.eventer.TaskEvents(ctx)
 }
 
 // SignalTask forwards a signal to a task.
 // This is an optional capability.
-func (d *HelloDriverPlugin) SignalTask(taskID string, signal string) error {
+func (d *WasmtimeDriverPlugin) SignalTask(taskID string, signal string) error {
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return drivers.ErrTaskNotFound
@@ -637,7 +622,7 @@ func (d *HelloDriverPlugin) SignalTask(taskID string, signal string) error {
 
 // ExecTask returns the result of executing the given command inside a task.
 // This is an optional capability.
-func (d *HelloDriverPlugin) ExecTask(taskID string, cmd []string, timeout time.Duration) (*drivers.ExecTaskResult, error) {
+func (d *WasmtimeDriverPlugin) ExecTask(taskID string, cmd []string, timeout time.Duration) (*drivers.ExecTaskResult, error) {
 	// TODO: implement driver specific logic to execute commands in a task.
 	return nil, errors.New("This driver does not support exec")
 }

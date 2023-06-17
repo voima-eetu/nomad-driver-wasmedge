@@ -1,2 +1,5 @@
 nomad-skeleton-driver-plugin
-hello-driver
+
+drivers/
+
+.idea/

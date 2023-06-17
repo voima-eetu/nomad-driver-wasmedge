@@ -70,7 +70,7 @@ the `example` folder:
 
 ```sh
 $ make build
-$ nomad agent -dev -config=./example/agent.hcl -plugin-dir=$(pwd)
+$ nomad agent -dev -config=./example/agent.hcl -plugin-dir=$(pwd)/drivers
 
 # in another shell
 $ nomad run ./example/example.nomad

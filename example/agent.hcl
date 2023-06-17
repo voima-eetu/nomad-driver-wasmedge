@@ -1,10 +1,10 @@
 # Copyright (c) HashiCorp, Inc.
 # SPDX-License-Identifier: MPL-2.0
 
-log_level = "TRACE"
+log_level = "DEBUG"
 
-plugin "hello-driver" {
+plugin "wasmtime-driver" {
   config {
-    shell = "bash"
+    path = "/opt/homebrew/bin/wasmtime"
   }
 }
