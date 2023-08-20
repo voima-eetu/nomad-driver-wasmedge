@@ -7,7 +7,7 @@ job "example" {
 
   group "example" {
     task "hello-world" {
-      driver = "wasmtime"
+      driver = "wasmedge"
 
       config {
         binary = "/Users/c16a/projects/zig-sample/main.wasm"

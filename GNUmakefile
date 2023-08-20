@@ -1,4 +1,4 @@
-PLUGIN_BINARY=wasmtime-driver
+PLUGIN_BINARY=wasmedge-driver
 export GO111MODULE=on
 
 default: build

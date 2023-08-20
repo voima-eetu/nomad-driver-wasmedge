@@ -1,4 +1,4 @@
-Nomad Wasmtime Plugin
+Nomad Wasmedge Plugin
 ==========
 
 Requirements
@@ -7,7 +7,7 @@ Requirements
 - [Go](https://golang.org/doc/install) v1.18 or later (to compile the plugin)
 - [Nomad](https://www.nomadproject.io/downloads.html) v0.9+ (to run the plugin)
 
-Building the Wasmtime Plugin
+Building the Wasmedge Plugin
 -------------------
 
 Clone the repository somewhere in your computer. This project uses

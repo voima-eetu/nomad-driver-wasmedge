@@ -1,5 +1,5 @@
 // TODO: update the module path below to match your own repository
-module github.com/c16a/nomad-driver-wasmtime
+module github.com/voima-eetu/nomad-driver-wasmedge
 
 go 1.19
 

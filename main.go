@@ -4,8 +4,8 @@
 package main
 
 import (
-	"github.com/c16a/nomad-driver-wasmtime/wasmtime"
 	"github.com/hashicorp/go-hclog"
+	"github.com/voima-eetu/nomad-driver-wasmedge/wasmedge"
 
 	"github.com/hashicorp/nomad/plugins"
 )
@@ -17,5 +17,5 @@ func main() {
 
 // factory returns a new instance of a nomad driver plugin
 func factory(log hclog.Logger) interface{} {
-	return wasmtime.NewPlugin(log)
+	return wasmedge.NewPlugin(log)
 }

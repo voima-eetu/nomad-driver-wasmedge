@@ -3,8 +3,8 @@
 
 log_level = "DEBUG"
 
-plugin "wasmtime-driver" {
+plugin "wasmedge-driver" {
   config {
-    path = "/opt/homebrew/bin/wasmtime"
+    path = "/opt/homebrew/bin/wasmedge"
   }
 }
