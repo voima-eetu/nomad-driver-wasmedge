@@ -11,12 +11,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/consul-template/signals"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
 	"github.com/hashicorp/nomad/drivers/shared/executor"
+	"github.com/hashicorp/nomad/helper/pluginutils/hclutils"
 	"github.com/hashicorp/nomad/plugins/base"
 	"github.com/hashicorp/nomad/plugins/drivers"
 	"github.com/hashicorp/nomad/plugins/shared/hclspec"
@@ -86,24 +88,9 @@ var (
 	// this is used to validated the configuration specified for the plugin
 	// when a job is submitted.
 	taskConfigSpec = hclspec.NewObject(map[string]*hclspec.Spec{
-		//
-		// The schema should be defined using HCL specs and it will be used to
-		// validate the task configuration provided by the user when they
-		// submit a job.
-		//
-		// For example, for the schema below a valid task would be:
-		//   job "example" {
-		//     group "example" {
-		//       task "say-hi" {
-		//         driver = "wasmedge-driver-plugin"
-		//         config {
-		//           greeting = "Hi"
-		//         }
-		//       }
-		//     }
-		//   }
-		"binary":    hclspec.NewAttr("binary", "string", true),
-		"invoke_fn": hclspec.NewAttr("invoke_fn", "string", false),
+		"binary":     hclspec.NewAttr("binary", "string", true),
+		"extra_args": hclspec.NewAttr("extra_args", "string", false),
+		"env":        hclspec.NewAttr("env", "list(map(string))", false),
 	})
 
 	// capabilities indicates what optional features this driver supports
@@ -130,13 +117,9 @@ type Config struct {
 // TaskConfig contains configuration information for a task that runs with
 // this plugin
 type TaskConfig struct {
-	// TODO: create decoded plugin task configuration struct
-	//
-	// This struct is the decoded version of the schema defined in the
-	// taskConfigSpec variable above. It's used to convert the string
-	// configuration for the task into Go contructs.
-	Binary   string `codec:"binary"`
-	InvokeFn string `codec:"invoke_fn"`
+	Binary    string             `codec:"binary"`
+	ExtraArgs string             `codec:"extra_args"`
+	Env       hclutils.MapStrStr `codec:"env"`
 }
 
 // TaskState is the runtime state which is encoded in the handle returned to
@@ -360,17 +343,29 @@ func (d *WasmedgeDriverPlugin) StartTask(cfg *drivers.TaskConfig) (*drivers.Task
 	}
 
 	var args []string
-	if len(driverConfig.InvokeFn) > 0 {
-		args = []string{"--invoke", driverConfig.InvokeFn, driverConfig.Binary}
-	} else {
-		args = []string{driverConfig.Binary}
+	for k, v := range driverConfig.Env {
+		args = append(args, "--env", k+"="+v)
+	}
+	if len(driverConfig.ExtraArgs) > 0 {
+		for _, eArg := range strings.Fields(driverConfig.ExtraArgs) {
+			args = append(args, eArg)
+		}
+	}
+	args = append(args, driverConfig.Binary)
+
+	user := cfg.User
+	if user == "" {
+		user = "nomad"
 	}
 
 	execCmd := &executor.ExecCommand{
-		Cmd:        d.config.Path,
-		Args:       args,
-		StdoutPath: cfg.StdoutPath,
-		StderrPath: cfg.StderrPath,
+		Cmd:              d.config.Path,
+		Args:             args,
+		Env:              cfg.EnvList(),
+		User:             user,
+		StdoutPath:       cfg.StdoutPath,
+		StderrPath:       cfg.StderrPath,
+		NetworkIsolation: cfg.NetworkIsolation,
 	}
 
 	ps, err := e.Launch(execCmd)
